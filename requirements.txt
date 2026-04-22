@@ -1,0 +1,6 @@
+pyTelegramBotAPI
+feedparser
+beautifulsoup4
+requests
+deep-translator
+google-generativeai
