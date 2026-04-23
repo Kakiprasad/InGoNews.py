@@ -12,13 +12,13 @@ import google.generativeai as genai
 from bs4 import BeautifulSoup
 
 # --- CONFIG ---
-TOKEN = os.getenv("TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+TOKEN = "8024122424:AAFRcQbPHIsrN7geIYGGViFXDqfkIJxgGPI"
+CHAT_ID = "5334000073"
+GEMINI_API_KEY = "AIzaSyCvROxVmWpqK2sCyXUWYTk7ytEnTM2EorM"
 
 bot = telebot.TeleBot(TOKEN)
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-2.5-flash")
+model = genai.GenerativeModel("gemini-2.5-flash") # మీరు చెప్పినట్లుగా ఇక్కడ మోడల్ నేమ్ చెక్ చేసుకోండి
 
 # --- LOG ---
 def log(msg, level="INFO"):
@@ -38,33 +38,21 @@ def translate(text):
 def send_long_message(chat_id, text):
     for i in range(0, len(text), 4000):
         try:
-            bot.send_message(chat_id, text[i:i+4000])
+            # parse_mode='Markdown' ద్వారా లింక్ హైడ్ అవుతుంది
+            bot.send_message(chat_id, text[i:i+4000], parse_mode='Markdown', disable_web_page_preview=False)
         except Exception as e:
             log(f"❌ Telegram send error: {e}", "ERROR")
 
-# --- RSS FEEDS ---
+# --- RSS FEEDS (Yahoo తొలగించబడింది) ---
 RSS_FEEDS = {
     "Moneycontrol": "https://www.moneycontrol.com/rss/latestnews.xml",
     "CNBC": "https://www.cnbctv18.com/commonfeeds/v1/cne/rss/latest.xml",
     "Economic Times": "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms",
     "NDTV News": "https://feeds.feedburner.com/ndtvnews-top-stories",
-    "Bloomberg": "https://feeds.bloomberg.com/markets/news.rss",
-    "Yahoo": "https://finance.yahoo.com/news/rssindex"
+    "Bloomberg": "https://feeds.bloomberg.com/markets/news.rss"
 }
 
 # --- FETCH RSS ---
-# --- Yahoo full content scraper ---
-def get_yahoo_summary(url):
-    try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        r = requests.get(url, headers=headers, timeout=5)
-        soup = BeautifulSoup(r.text, "html.parser")
-        paragraphs = soup.find_all("p")
-        text = " ".join(p.get_text() for p in paragraphs[:5]) # మొదటి 5 పేరాలు
-        return text[:500] if text else "" 
-    except:
-        return ""
-
 def fetch_rss():
     log("🌍 RSS checking started...")
     for name, url in RSS_FEEDS.items():
@@ -82,33 +70,24 @@ def fetch_rss():
                 sent_links.add(link)
                 title = entry.get("title", "")
 
-                # --- Yahoo అయితేనే Scraping చేస్తుంది ---
-                if name == "Yahoo":
-                    log(f"🔎 Scraping Yahoo link for summary...")
-                    clean_desc = get_yahoo_summary(link)
-                    if not clean_desc: # స్క్రాపింగ్ ఫెయిల్ అయితే ఫీడ్ లో ఉన్నది తీసుకుంటుంది
-                        summary_raw = entry.get("description") or entry.get("summary") or ""
-                        clean_desc = re.sub('<[^>]+>', '', summary_raw)
-                else:
-                    # మిగతా ఫీడ్స్ కి పాత లాజిక్ (వేగంగా ఉంటుంది)
-                    summary_raw = entry.get("summary") or entry.get("description") or ""
-                    clean_desc = re.sub('<[^>]+>', '', summary_raw)
-
+                # సమ్మరీ క్లీనింగ్
+                summary_raw = entry.get("summary") or entry.get("description") or ""
+                clean_desc = re.sub('<[^>]+>', '', summary_raw)
                 clean_desc = clean_desc.replace("\n", " ").strip()
                 
                 # తెలుగు అనువాదం
                 tel_title = translate(title)
-                # ఒకవేళ సమ్మరీ అస్సలు దొరకకపోతే టైటిల్ నే సమ్మరీగా వాడదాం
                 if not clean_desc or len(clean_desc) < 10:
                     tel_desc = "పూర్తి వివరాల కోసం క్రింది లింక్ క్లిక్ చేయండి."
                 else:
                     tel_desc = translate(clean_desc[:800])
 
+                # మెసేజ్ ఫార్మాట్ - ఇక్కడ లింక్ హైడ్ చేయబడింది
                 msg = (
                     f"📌 *{tel_title}*\n\n"
                     f"🇬🇧 *English Title:*\n{title}\n\n"
                     f"🇮🇳 *తెలుగు సమ్మరీ:*\n{tel_desc}\n\n"
-                    f"🌐 **{name}** | 🔗 [Read More]({link})"
+                    f"🌐 *{name}* | 🔗 [Read More]({link})"
                 )
 
                 rss_news_store.append(title + " " + clean_desc)
@@ -153,6 +132,7 @@ DATA:
     except Exception as e:
         log(f"❌ AI Error: {e}", "ERROR")
 
+
 # --- LIST COMMAND ---
 @bot.message_handler(commands=['list'])
 def list_news(message):
@@ -191,33 +171,26 @@ def list_news(message):
 
     send_long_message(CHAT_ID, response)
 
-# --- LOOP ---
+# --- LOOP & BOT START ---
 def loop():
     while True:
-        log("🔁 New cycle started")
         try:
             fetch_rss()
-            log("✅ Cycle completed")
         except Exception as e:
             log(f"❌ Loop Error: {e}", "ERROR")
         time.sleep(120)
 
-# --- BOT ---
 def start_bot():
     while True:
         try:
-            log("🤖 Bot polling...")
             bot.infinity_polling()
         except Exception as e:
             log(f"❌ Polling Error: {e}", "ERROR")
             time.sleep(5)
 
-# --- MAIN ---
 if __name__ == "__main__":
     threading.Thread(target=loop, daemon=True).start()
     threading.Thread(target=start_bot, daemon=True).start()
-
-    log("🚀 Bot Started Successfully")
-
+    log("🚀 Bot Started Successfully without Yahoo")
     while True:
         time.sleep(60)
