@@ -91,7 +91,7 @@ def fetch_rss():
                 google_translate_url = f"https://translate.google.com/translate?sl=en&tl=te&u={link}"
 
                 msg = (
-                    f"[ ]({link})" 
+                    f"[\u200b]({link})" 
                     f"📌 *{tel_title}*\n\n"
                     f"🇬🇧 *English Title:*\n{title}\n\n"
                     f"🇮🇳 *తెలుగు సమ్మరీ:*\n{tel_desc}\n\n"
