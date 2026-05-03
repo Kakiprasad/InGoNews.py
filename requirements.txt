@@ -1,8 +1,7 @@
-cloudscraper
+pyTelegramBotAPI
 requests
 feedparser
-pyTelegramBotAPI
+google-genai
 deep-translator
-google-generativeai
 beautifulsoup4
-
+cloudscraper
