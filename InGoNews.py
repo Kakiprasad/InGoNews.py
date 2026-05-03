@@ -12,9 +12,9 @@ from google import genai
 from bs4 import BeautifulSoup
 
 # --- CONFIG ---
-TOKEN = os.getenv("BOT_TOKEN") or ""
-CHAT_ID = os.getenv("CHAT_ID") or ""
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or ""
+TOKEN = os.getenv("BOT_TOKEN") 
+CHAT_ID = os.getenv("CHAT_ID") 
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") 
 
 bot = telebot.TeleBot(TOKEN)
 client = genai.Client(api_key=GEMINI_API_KEY)
