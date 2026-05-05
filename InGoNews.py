@@ -8,17 +8,17 @@ from deep_translator import GoogleTranslator
 import threading
 import telebot
 import feedparser
-from google import genai
+from google import genai 
 from bs4 import BeautifulSoup
 
 # --- CONFIG ---
-TOKEN = os.getenv("BOT_TOKEN") 
-CHAT_ID = os.getenv("CHAT_ID") 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+TOKEN = os.getenv("BOT_TOKEN") or ""
+CHAT_ID = os.getenv("CHAT_ID") or ""
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or ""
 
 bot = telebot.TeleBot(TOKEN)
 client = genai.Client(api_key=GEMINI_API_KEY)
-MODEL_NAME = "gemini-2.5-flash" 
+MODEL_ID = "gemini-2.5-flash" # తాజా మోడల్ కి మార్చబడింది
 
 # --- LOG ---
 def log(msg, level="INFO"):
@@ -27,8 +27,6 @@ def log(msg, level="INFO"):
 # --- DATA ---
 rss_news_store = []
 sent_links = set()
-MAX_NEWS = 5000
-CLEAR_COUNT = 1000
 
 # --- HELPERS ---
 def translate(text):
@@ -37,109 +35,77 @@ def translate(text):
     except:
         return text
 
-def clean_html_tags(text):
-    if not text: return ""
-    return text.replace("<", "&lt;").replace(">", "&gt;").replace("&", "&amp;")
-
 def send_long_message(chat_id, text):
+    """
+    మెసేజ్ లో Markdown ఎర్రర్స్ ఉంటే వాటిని ప్లెయిన్ టెక్స్ట్ గా పంపుతుంది.
+    """
     for i in range(0, len(text), 4000):
+        part = text[i:i+4000]
         try:
-            bot.send_message(chat_id, text[i:i+4000], parse_mode='HTML', disable_web_page_preview=False)
+            bot.send_message(chat_id, part, parse_mode='Markdown', disable_web_page_preview=False)
         except Exception as e:
-            log(f"❌ Telegram send error: {e}", "ERROR")
+            # Markdown వల్ల ఎర్రర్ వస్తే, ఎటువంటి ఫార్మాటింగ్ లేకుండా పంపుతుంది
+            log(f"⚠️ Markdown parsing failed, sending as plain text: {e}", "WARNING")
+            bot.send_message(chat_id, part, disable_web_page_preview=False)
 
-def manage_memory():
-    global rss_news_store
-    if len(rss_news_store) > MAX_NEWS:
-        rss_news_store = rss_news_store[CLEAR_COUNT:]
-        log(f"✅ Memory cleaned.")
-
-# =========================
-# 🟢 NORMAL RSS FETCH
-# =========================
-def fetch_normal_rss():
-    FEEDS = {
+# --- FETCH RSS (Memory Management Included) ---
+def fetch_rss():
+    global rss_news_store, sent_links
+    log("🌍 RSS checking started...")
+    
+    # మెమరీ క్లీనింగ్: 5000 వార్తలు దాటితే పాత 1000 వార్తలు క్లియర్ అవుతాయి
+    if len(rss_news_store) >= 5000:
+        log("🧹 Memory cleaning: Removing oldest 1000 items...")
+        rss_news_store = rss_news_store[1000:]
+        
+        if len(sent_links) > 6000:
+            sent_links = set(list(sent_links)[-5000:])
+    
+    RSS_FEEDS = {
+        "Moneycontrol": "https://www.moneycontrol.com/rss/latestnews.xml",
         "CNBC": "https://www.cnbctv18.com/commonfeeds/v1/cne/rss/latest.xml",
+        "Economic Times": "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms",
+        "NDTV News": "https://feeds.feedburner.com/ndtvnews-top-stories",
+        "Bloomberg": "https://feeds.bloomberg.com/markets/news.rss"
     }
-    for name, url in FEEDS.items():
+
+    for name, url in RSS_FEEDS.items():
         try:
-            res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+            headers = {"User-Agent": "Mozilla/5.0"}
+            res = requests.get(url, headers=headers, timeout=15)
             feed = feedparser.parse(res.content)
+            
             for entry in feed.entries[:10]:
                 link = entry.get("link", "")
-                if not link or link in sent_links: continue
-                sent_links.add(link)
+                if not link or link in sent_links:
+                    continue
 
-                title = clean_html_tags(entry.get("title", ""))
-                clean_desc = re.sub('<[^>]+>', '', entry.get("summary", "")).replace("\n", " ").strip()
+                sent_links.add(link)
+                title = entry.get("title", "")
+                summary_raw = entry.get("summary") or entry.get("description") or ""
+                clean_desc = re.sub('<[^>]+>', '', summary_raw).replace("\n", " ").strip()
+                
                 tel_title = translate(title)
-                tel_desc = translate(clean_desc[:800])
-                g_trans_url = f"https://translate.google.com/translate?sl=en&tl=te&u={link}"
+                tel_desc = translate(clean_desc[:800]) if len(clean_desc) > 10 else "పూర్తి వివరాల కోసం క్రింది లింక్ క్లిక్ చేయండి."
+
+                google_translate_url = f"https://translate.google.com/translate?sl=en&tl=te&u={link}"
 
                 msg = (
-                    f'<a href="{link}">&#8203;</a>'
-                    f"📌 <b>{tel_title}</b>\n\n"
-                    f"🇬🇧 <b>English Title:</b>\n{title}\n\n"
-                    f"🇮🇳 <b>తెలుగు సమ్మరీ:</b>\n{tel_desc}\n\n"
-                    f"🌐 <b>{name}</b>\n"
-                    f"🔗 <a href='{g_trans_url}'>Read More in Telugu</a> | "
-                    f"<a href='{link}'>English Original</a>"
+                    f"[ ]({link})" 
+                    f"📌 *{tel_title}*\n\n"
+                    f"🇬🇧 *English Title:*\n{title}\n\n"
+                    f"🇮🇳 *తెలుగు సమ్మరీ:*\n{tel_desc}\n\n"
+                    f"🌐 *{name}* | 🔗 [Read More in Telugu]({google_translate_url})"
                 )
+
                 rss_news_store.append(title + " " + clean_desc)
-                manage_memory()
                 send_long_message(CHAT_ID, msg)
                 time.sleep(1)
+
         except Exception as e:
             log(f"❌ RSS Error {name}: {e}", "ERROR")
 
-# =========================
-# 🔵 X (NITTER) RSS FETCH
-# =========================
-def fetch_x_rss():
-    X_FEEDS = {
-        "CNBC News (X)": "https://nitter.net/CNBCTV18News/rss",
-        "CNBC Live (X)": "https://nitter.net/CNBCTV18Live/rss",
-    }
-    scraper = cloudscraper.create_scraper()
-    for name, url in X_FEEDS.items():
-        try:
-            res = scraper.get(url, timeout=20)
-            if res.status_code != 200: continue
-            feed = feedparser.parse(res.content)
-            for entry in feed.entries[:5]:
-                link = entry.get("link", "")
-                if not link or link in sent_links: continue
-                sent_links.add(link)
-
-                title = clean_html_tags(re.sub(r'http\S+|@\w+|#\w+|⤵️', '', entry.get("title", "")))
-                tel_title = translate(title)
-                g_trans_url = f"https://translate.google.com/translate?sl=en&tl=te&u={link}"
-
-                msg = (
-                    f"🚀 <b>{name} Update</b>\n\n"
-                    f"📌 <b>{tel_title}</b>\n\n"
-                    f"🇬🇧 {title}\n\n"
-                    f"🔗 <a href='{g_trans_url}'>Read More in Telugu</a> | "
-                    f"<a href='{link}'>English Original</a>"
-                )
-                rss_news_store.append(title)
-                manage_memory()
-
-                # ఇమేజ్ ఉంటే ఫోటో పంపుతుంది
-                soup = BeautifulSoup(str(entry.get('summary', '')), 'html.parser')
-                img = soup.find('img')
-                if img:
-                    try: bot.send_photo(CHAT_ID, img['src'], caption=msg[:1024], parse_mode='HTML')
-                    except: send_long_message(CHAT_ID, msg)
-                else:
-                    send_long_message(CHAT_ID, msg)
-                time.sleep(2)
-        except Exception as e:
-            log(f"❌ X RSS Error {name}: {e}", "ERROR")
-
-# =========================
-# 🤖 AI SUMMARY
-# =========================
+# --- AI SUMMARY COMMAND ---
 @bot.message_handler(commands=['summary'])
 def summary(message):
     if not rss_news_store:
@@ -147,21 +113,29 @@ def summary(message):
         return
 
     bot.send_message(CHAT_ID, "🔍 AI విశ్లేషణ జరుగుతోంది...")
-    rss_data = "\n".join(rss_news_store[-100:])
-    prompt = f"Analyze these news items in 4 sections: Corporate, National, Global, and Outlook. Output in Telugu:\n{rss_data}"
+    rss = "\n".join(rss_news_store[-100:])
 
+    prompt = f"""
+Please analyze the following news data and provide a detailed market summary in Telugu:
+
+1. 📈 **Nifty & Market Sentiment**: Based on the news, explain the current situation of Nifty 50. Is it bullish, bearish, or sideways? Mention key levels if available.
+2. 🚀 **Stock Market & Corporate Analysis**: Highlight important stocks that are in focus and why.
+3. 🇮🇳 **National & Policy News**: Key government decisions affecting the economy.
+4. 🌍 **Global Trends**: Impact of international markets (US Fed, Crude Oil, etc.) on our market.
+
+Provide actionable insights for traders/investors in a professional Telugu tone.
+
+DATA:
+{rss}
+"""
+    
     try:
-        response = client.models.generate_content(model=MODEL_NAME, contents=prompt)
-        # AI ఇచ్చే మెసేజ్‌లో <b> ట్యాగులు ఉండేలా మార్చవచ్చు లేదా ప్లెయిన్ టెక్స్ట్
-        final_text = clean_html_tags(response.text).replace("**", "")
-        bot.send_message(CHAT_ID, f"📊 <b>AI విశ్లేషణ</b>\n\n{final_text}", parse_mode='HTML')
-        log("✅ Summary sent")
+        response = client.models.generate_content(model=MODEL_ID, contents=prompt)
+        send_long_message(CHAT_ID, response.text)
     except Exception as e:
         log(f"❌ AI Error: {e}", "ERROR")
 
-# =========================
-# 📋 LIST
-# =========================
+# --- LIST COMMAND ---
 @bot.message_handler(commands=['list'])
 def list_news(message):
     log(f"📋 List command requested")
@@ -202,33 +176,27 @@ def list_news(message):
 
     send_long_message(CHAT_ID, response)
     log(f"✅ List Page {page} sent")
-
-# =========================
-# 🔄 LOOP & BOT START
-# =========================
+    
+# --- LOOP & BOT START ---
 def loop():
-    log("📡 Background Fetcher Started...")
     while True:
         try:
-            fetch_normal_rss()
-            fetch_x_rss()
+            fetch_rss()
         except Exception as e:
             log(f"❌ Loop Error: {e}", "ERROR")
-        time.sleep(120) # 2 నిమిషాల గ్యాప్
+        time.sleep(120)
 
 def start_bot():
-    log("🚀 Bot Polling Started...")
     while True:
         try:
-            bot.infinity_polling(timeout=10, long_polling_timeout=5)
+            bot.infinity_polling()
         except Exception as e:
             log(f"❌ Polling Error: {e}", "ERROR")
             time.sleep(5)
 
 if __name__ == "__main__":
-    # 1. త్రెడ్ లో న్యూస్ ఫెచింగ్ రన్ చేయడం
+    # రెండు పనులను వేర్వేరుగా రన్ చేయడం
     threading.Thread(target=loop, daemon=True).start()
     
-    # 2. మెయిన్ ప్రాసెస్ లో బాట్ ని రన్ చేయడం
-    log("🤖 BOT IS ONLINE")
+    log("🚀 Bot Started with New Google GenAI SDK")
     start_bot()
